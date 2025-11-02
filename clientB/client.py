@@ -1,9 +1,9 @@
 import os, time, json, hashlib, urllib.request, urllib.parse, logging
 
-# === הגדרות כלליות ===
+# === General Settings ===
 SERVER = "http://127.0.0.1:8080"
-LOCAL = os.path.abspath("synced")   # תיקיית סנכרון מקומית
-SCAN_INTERVAL = 3                   # כל כמה שניות לבדוק שינויים
+LOCAL = os.path.abspath("synced")   # Local sync folder
+SCAN_INTERVAL = 3                   # Interval (seconds) between sync cycles
 STATE_FILE = os.path.join(LOCAL, ".local_state.json")
 
 # === Logger ===
@@ -14,22 +14,25 @@ logging.basicConfig(
 )
 log = logging.getLogger("SyncClient")
 
-# === עזר ===
+# === Helper Functions ===
 def sha256_of_file(p):
+    """Compute SHA256 hash of a file"""
     h = hashlib.sha256()
     with open(p, "rb") as f:
-        for chunk in iter(lambda: f.read(1024*1024), b""):
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
 
 def local_index():
+    """Return a dictionary of local files with their SHA and modification time"""
     idx = {}
     if not os.path.exists(LOCAL):
         os.makedirs(LOCAL, exist_ok=True)
         log.info(f"Created local folder: {LOCAL}")
+
     for dirpath, _, files in os.walk(LOCAL):
         for fn in files:
-            if fn == ".local_state.json":  # לא לספור את state
+            if fn == ".local_state.json":
                 continue
             rel = os.path.relpath(os.path.join(dirpath, fn), LOCAL).replace("\\", "/")
             fp = os.path.join(LOCAL, rel)
@@ -38,10 +41,12 @@ def local_index():
     return idx
 
 def get_server_index():
+    """Fetch the server's file index (includes sha and mtime)"""
     with urllib.request.urlopen(SERVER + "/index") as r:
         return json.loads(r.read())["index"]
 
 def download_file(path):
+    """Download a file from the server"""
     q = urllib.parse.urlencode({"path": path})
     with urllib.request.urlopen(SERVER + "/download?" + q) as r:
         data = r.read()
@@ -51,6 +56,7 @@ def download_file(path):
     log.info(f"⬇ Downloaded: {path} ({len(data)} bytes)")
 
 def upload_file(path, base_sha):
+    """Upload a file to the server"""
     fp = os.path.join(LOCAL, path)
     with open(fp, "rb") as f:
         data = f.read()
@@ -59,13 +65,17 @@ def upload_file(path, base_sha):
         SERVER + "/upload",
         method="POST",
         data=meta + data,
-        headers={"Content-Type": "application/octet-stream", "X-Meta-Length": str(len(meta))}
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-Meta-Length": str(len(meta))
+        }
     )
     with urllib.request.urlopen(req) as r:
         result = json.loads(r.read())
     log.info(f"⬆ Uploaded: {path} (v{result['version']})")
 
 def delete_on_server(path):
+    """Delete a file on the server"""
     req = urllib.request.Request(
         SERVER + "/delete",
         method="POST",
@@ -76,6 +86,7 @@ def delete_on_server(path):
     log.info(f"🗑️ Deleted remotely: {path}")
 
 def load_state():
+    """Load previous sync state (list of known files)"""
     try:
         if os.path.exists(STATE_FILE):
             return json.load(open(STATE_FILE, "r", encoding="utf-8"))
@@ -84,21 +95,25 @@ def load_state():
     return {"files": []}
 
 def save_state(files_list):
+    """Save current list of files to state file"""
     try:
         json.dump({"files": sorted(files_list)}, open(STATE_FILE, "w", encoding="utf-8"))
     except Exception:
         pass
 
+# === Core Sync Logic (timestamp-based) ===
 def sync_once():
-    # --- שלב 1: אינדקסים ---
+    # --- Step 1: Get indexes ---
     sidx = get_server_index()
     lidx = local_index()
 
-    # --- שלב 2: מחיקות מקומיות מכוונות (לפני הורדות!) ---
-    prev_files = set(load_state().get("files", []))
+    # --- Step 2: Load previous state ---
+    prev_state = load_state()
+    prev_files = set(prev_state.get("files", []))
     curr_files = set(lidx.keys())
-    locally_deleted = prev_files - curr_files
 
+    # --- Step 3: Handle local deletions ---
+    locally_deleted = prev_files - curr_files
     for path in locally_deleted:
         if path in sidx:
             try:
@@ -107,37 +122,56 @@ def sync_once():
             except Exception as e:
                 log.error(f"Failed to delete remotely {path}: {e}")
 
-    # --- שלב 3: ריענון אינדקס אחרי מחיקות ---
+    # --- Step 4: Refresh indexes ---
     sidx = get_server_index()
     lidx = local_index()
 
-    # --- שלב 4: העלאות (קבצים חדשים / שונו) ---
-    for path, lmeta in lidx.items():
-        smeta = sidx.get(path)
-        if not smeta or smeta["sha"] != lmeta["sha"]:
-            base_sha = smeta["sha"] if smeta else None
-            upload_file(path, base_sha)
-
-    # --- שלב 5: הורדות (רק אחרי מחיקות והעלאות) ---
-    sidx = get_server_index()
-    lidx = local_index()
-    for path, meta in sidx.items():
-        lp = os.path.join(LOCAL, path)
-        need = (not os.path.exists(lp))
-        if not need:
+    # --- 🔥 Step 5: Handle remote deletions (important fix) ---
+    for path in list(lidx.keys()):
+        if path not in sidx:
+            # The server no longer has this file — delete locally
             try:
-                need = (sha256_of_file(lp) != meta["sha"])
+                os.remove(os.path.join(LOCAL, path))
+                log.info(f"🗑️ Deleted locally (server no longer has): {path}")
             except FileNotFoundError:
-                need = True
-        if need and meta.get("sha"):
-            download_file(path)
+                pass
 
-    # --- שלב 6: שמירת מצב נוכחי ---
+    # --- Step 6: Uploads and Updates (with timestamp comparison) ---
+    for path, lmeta in local_index().items():
+        smeta = sidx.get(path)
+
+        if not smeta:
+            # File doesn't exist on the server -> upload it
+            upload_file(path, None)
+            continue
+
+        if smeta["sha"] != lmeta["sha"]:
+            server_mtime = smeta.get("mtime", 0)
+            local_mtime = lmeta["mtime"]
+
+            if local_mtime > server_mtime + 1:
+                upload_file(path, smeta["sha"])
+                log.info(f"⬆ Updated on server (newer local): {path}")
+            elif server_mtime > local_mtime + 1:
+                download_file(path)
+                log.info(f"⬇ Updated locally (newer server): {path}")
+            else:
+                log.info(f"⚖️ Skipped (similar timestamps): {path}")
+
+    # --- Step 7: Download missing files (added on server) ---
+    for path, smeta in sidx.items():
+        if path not in local_index():
+            download_file(path)
+            log.info(f"⬇ Added missing local file: {path}")
+
+    # --- Step 8: Save current state ---
     save_state(list(local_index().keys()))
+
 
 def main():
     log.info("Client started – watching for changes...")
     os.makedirs(LOCAL, exist_ok=True)
+
     while True:
         try:
             sync_once()
