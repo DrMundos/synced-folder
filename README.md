@@ -1,128 +1,151 @@
-# 🗂️ Synced Folder
+🗂️ Synced Folder
 
-A simple **file synchronization system** built in Python, designed for educational purposes.  
-It consists of a lightweight **server** and **client** that automatically sync files between multiple machines — similar in concept to Dropbox, but fully local and minimal.
+A simple file synchronization system built in Python, designed for educational and demonstration purposes.
+It includes a lightweight server, client, and optional PostgreSQL + Grafana integration for monitoring activity — conceptually similar to Dropbox, but fully local and minimal.
 
---------------------------------------------------------------------------------
+⚙️ Features
 
-## ⚙️ Features
+🔄 Automatic file synchronization between clients and a central server
 
-- 🔄 **Automatic synchronization** between clients and a central server  
-- ⬆️ Uploads and ⬇️ downloads handled automatically  
-- 🗑️ Local deletions are synced to the server  
-- 🧩 Conflict detection and version tracking  
-- 🪶 Built with only Python’s standard library — no external dependencies  
-- 🧠 Fully open and easy to understand — great for learning about file synchronization logic  
+⬆️ Uploads and ⬇️ downloads handled automatically
 
---------------------------------------------------------------------------------
+🗑️ Local deletions propagate to the server
 
-## 🧰 Project Structure
+🧩 Conflict detection and version tracking
 
+🧠 Built entirely with Python’s standard library — no external dependencies required for core sync logic
+
+🗃️ Optional PostgreSQL database for tracking file events
+
+📊 Optional Grafana dashboard for visualizing sync activity
+
+🧰 Project Structure
 synced-folder/
 │
 ├── server/
-│ └── server.py # Runs the HTTP server and manages file index
+│   └── server.py          # HTTP server handling uploads, downloads, and file index
 │
 ├── client/
-│ └── client.py # Client that watches and syncs local folder
+│   └── client.py          # Watches local folder, syncs with the server
 │
-├── .gitignore
+├── grafana/
+│   ├── provisioning/
+│   │   ├── datasources/
+│   │   │   └── datasource.yml
+│   │   └── dashboards/
+│   │       └── dashboard.yml
+│   └── dashboards/
+│       └── sync_dashboard.json
+│
+├── docker-compose.yml     # Multi-container setup for client, server, PostgreSQL, and Grafana
+├── Dockerfile             # Shared build for both server and client
 └── README.md
 
-
---------------------------------------------------------------------------------
-
-
-## 🚀 How to Run
-
-### 1️⃣ Start the Server
-
-```bash
-cd server
-python server.py
-
-# The server will start on port 8080 and create a storage directory (storage/) to hold uploaded files
+🚀 Quick Start (Docker Setup)
+1️⃣ Build and start all containers
+docker compose up --build
 
 
-### 2️⃣ Start the Cleint 
-cd client
-python client.py
+This launches:
 
-#A folder called synced/ will appear automatically. Any file you place inside this folder will upload to the server and sync across all clients connected to the same server.
+🐘 PostgreSQL (sync_postgres)
+
+⚙️ Server (sync_server)
+
+💻 Client (sync_client)
+
+📈 Grafana (sync_grafana)
+
+2️⃣ Access the system
+Component	URL	Default Credentials
+Server API	http://localhost:8080
+	N/A
+Client Synced Folder	./client/synced/	Files auto-sync
+Grafana Dashboard	http://localhost:3030
+	admin / admin
+3️⃣ Test synchronization
+
+Add or edit files inside client/synced/
+→ They’ll automatically upload to the server and appear in the server/storage/ folder.
+
+Deletions or modifications will propagate both ways.
+
+4️⃣ View database activity
+
+Open PostgreSQL shell:
+
+docker exec -it sync_postgres psql -U syncuser -d syncdb
 
 
---------------------------------------------------------------------------------
+Check the sync log:
+
+SELECT * FROM files_log ORDER BY id DESC LIMIT 10;
+
+5️⃣ View metrics in Grafana
+
+Grafana automatically loads:
+
+PostgreSQL as a preconfigured data source
+
+A ready-to-use dashboard showing uploads and deletions over time
+
+Visit http://localhost:3030
+, log in as admin / admin, and explore the “Sync Folder Activity” dashboard.
 
 🧩 How Synchronization Works
 
-The client scans the local folder (synced/) every few seconds.
+The client periodically scans its local folder (synced/).
 
-It compares file hashes (SHA256) with the server index.
+It compares file SHA256 hashes against the server’s index.
 
-Changes are uploaded or downloaded automatically.
+Changes are automatically uploaded or downloaded.
 
-Local deletions trigger a remote delete on the server.
+Local deletions trigger remote deletions.
 
-The server keeps a version index for all synced files.
+The server maintains version history and logs actions in PostgreSQL.
 
---------------------------------------------------------------------------------
+🧪 Example Workflow
 
+Run docker compose up
 
-🧪 Example Demo
+Drop example.txt into client/synced/
 
-Run the server.
+The file appears in server/storage/
 
-Run two clients (on two different machines or folders).
+PostgreSQL logs the upload
 
-Add or modify files in one client → they appear in the other.
-
-Delete a file locally → it’s removed everywhere.
-
-
---------------------------------------------------------------------------------
+Grafana shows the new data point on the chart
 
 🧱 Technologies Used
 
-🐍 Python 3.13.3
+🐍 Python 3.10 (standard library only)
 
-Standard libraries only:
+🐘 PostgreSQL 15
 
-http.server
+📈 Grafana (auto-provisioned dashboard)
 
-hashlib
-
-json
-
-os, time, logging, urllib
-
---------------------------------------------------------------------------------
-
+🐳 Docker + Docker Compose
 
 ⚠️ Limitations
 
-This is a simple educational implementation.
-It does not yet include:
+This is a simplified demo implementation.
+It does not include:
 
-Encryption or authentication
+Authentication or encryption
 
 Large-file chunking
 
-“Tombstones” (deleted file history)
+File rename tracking or “tombstones”
 
-However, it’s a great foundation for implementing those features later.
-
---------------------------------------------------------------------------------
+Distributed conflict resolution
 
 👤 Author
 
 Sahar Gehasi
 Built as part of a Computer Systems Workshop final project.
-
---------------------------------------------------------------------------------
+Extended for Dockerized deployment with PostgreSQL & Grafana observability.
 
 🧡 License
 
-This project is released under the MIT License.
-You’re free to use, modify, and share it for any purpose.
-
---------------------------------------------------------------------------------
+Released under the MIT License.
+You’re free to use, modify, and distribute this project for any purpose.
