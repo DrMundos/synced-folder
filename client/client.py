@@ -1,7 +1,7 @@
 import os, time, json, hashlib, urllib.request, urllib.parse, logging
 
 # === הגדרות כלליות ===
-SERVER = "http://127.0.0.1:8080"
+SERVER = os.environ.get("SERVER", "http://127.0.0.1:8080")
 LOCAL = os.path.abspath("synced")   # תיקיית סנכרון מקומית
 SCAN_INTERVAL = 3                   # כל כמה שניות לבדוק שינויים
 STATE_FILE = os.path.join(LOCAL, ".local_state.json")

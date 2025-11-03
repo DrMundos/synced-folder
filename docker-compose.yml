@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: sync_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: syncuser
+      POSTGRES_PASSWORD: syncpass
+      POSTGRES_DB: syncdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - syncnet
+
+  server:
+    build: .
+    container_name: sync_server
+    command: python server/server.py
+    depends_on:
+      - postgres
+    volumes:
+      - ./server:/app/server
+      - ./storage:/app/storage
+    ports:
+      - "8080:8080"
+    networks:
+      - syncnet
+
+  client:
+    build: .
+    container_name: sync_client
+    command: python client/client.py
+    depends_on:
+      - server
+    environment:
+      SERVER: http://sync_server:8080
+    volumes:
+      - ./client:/app/client
+      - ./synced:/app/synced
+    networks:
+      - syncnet
+
+volumes:
+  pgdata:
+
+networks:
+  syncnet:
