@@ -1,4 +1,7 @@
+version: "3.9"
+
 services:
+  # === PostgreSQL Database ===
   postgres:
     image: postgres:15
     container_name: sync_postgres
@@ -9,39 +12,71 @@ services:
       POSTGRES_DB: syncdb
     volumes:
       - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # access from host if needed
     networks:
       - syncnet
 
+  # === Sync Server ===
   server:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: sync_server
-    command: python server/server.py
+    command: ["python", "server/server.py"]
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=syncdb
+      - POSTGRES_USER=syncuser
+      - POSTGRES_PASSWORD=syncpass
+    volumes:
+      - ./storage:/app/storage
     depends_on:
       - postgres
-    volumes:
-      - ./server:/app/server
-      - ./storage:/app/storage
     ports:
       - "8080:8080"
     networks:
       - syncnet
 
+  # === Sync Client ===
   client:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: sync_client
-    command: python client/client.py
+    command: ["python", "client/client.py"]
+    environment:
+      - SERVER=http://server:8080
+    volumes:
+      - ./synced:/app/synced
     depends_on:
       - server
-    environment:
-      SERVER: http://sync_server:8080
-    volumes:
-      - ./client:/app/client
-      - ./synced:/app/synced
     networks:
       - syncnet
 
-volumes:
-  pgdata:
+  # === Grafana Visualization ===
+  grafana:
+    image: grafana/grafana:latest
+    container_name: sync_grafana
+    restart: always
+    ports:
+      - "3030:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - postgres
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - syncnet
 
+# === Networks ===
 networks:
   syncnet:
+
+# === Volumes ===
+volumes:
+  pgdata:
+  grafana-data:

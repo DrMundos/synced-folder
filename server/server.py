@@ -1,7 +1,10 @@
 import os, json, hashlib, time, urllib.parse, logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from psycopg2 import OperationalError
 
-# === Logger Setup ===
+# === Logger ===
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s: %(message)s',
@@ -9,12 +12,71 @@ logging.basicConfig(
 )
 log = logging.getLogger("SyncServer")
 
+# === Paths ===
 ROOT = os.path.abspath("storage")
 INDEX_FILE = os.path.join(ROOT, ".index.json")
 
-# === Utility Functions ===
+# === DB Config ===
+DB_HOST = os.environ.get("DB_HOST", "postgres")
+DB_USER = os.environ.get("DB_USER", "syncuser")
+DB_PASS = os.environ.get("DB_PASS", "syncpass")
+DB_NAME = os.environ.get("DB_NAME", "syncdb")
+
+# === DB Connection with Retry ===
+def get_db_connection(retries=10, delay=3):
+    for attempt in range(1, retries + 1):
+        try:
+            conn = psycopg2.connect(
+                host=DB_HOST,
+                user=DB_USER,
+                password=DB_PASS,
+                dbname=DB_NAME
+            )
+            return conn
+        except OperationalError as e:
+            log.warning(f"⏳ Waiting for DB (attempt {attempt}/{retries}): {e}")
+            time.sleep(delay)
+    raise Exception("❌ Could not connect to PostgreSQL after multiple attempts.")
+
+def init_db():
+    """Ensure files_log table exists."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS files_log (
+                id SERIAL PRIMARY KEY,
+                action VARCHAR(20),
+                path TEXT,
+                version INT,
+                sha TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        log.info("✅ Database ready (table 'files_log' ensured).")
+    except Exception as e:
+        log.error(f"❌ Failed to init database: {e}")
+
+def log_to_db(action, path, version=None, sha=None):
+    """Insert upload/delete events into PostgreSQL."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO files_log (action, path, version, sha) VALUES (%s, %s, %s, %s)",
+            (action, path, version, sha)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        log.error(f"DB error: {e}")
+
+# === File Utilities ===
 def sha256_of_file(p):
-    """Compute SHA256 hash of a file"""
     h = hashlib.sha256()
     with open(p, "rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
@@ -22,7 +84,6 @@ def sha256_of_file(p):
     return h.hexdigest()
 
 def load_index():
-    """Load the file index from disk"""
     if not os.path.exists(ROOT):
         os.makedirs(ROOT, exist_ok=True)
         log.info("Created storage folder.")
@@ -32,12 +93,10 @@ def load_index():
         return json.load(f)
 
 def save_index(idx):
-    """Save the current file index to disk"""
     with open(INDEX_FILE, "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=2)
 
 def refresh_index_from_disk(idx):
-    """Re-scan the storage folder to ensure all files are in the index"""
     for dirpath, _, files in os.walk(ROOT):
         for fn in files:
             if fn == ".index.json":
@@ -48,17 +107,15 @@ def refresh_index_from_disk(idx):
             if rel not in idx:
                 idx[rel] = {"sha": sha256_of_file(fp), "mtime": st.st_mtime, "version": 1}
             else:
-                # Update mtime and sha if changed on disk
                 new_sha = sha256_of_file(fp)
                 if new_sha != idx[rel]["sha"]:
                     idx[rel]["sha"] = new_sha
                     idx[rel]["mtime"] = st.st_mtime
     return idx
 
-# === HTTP Request Handler ===
+# === HTTP Handler ===
 class Handler(BaseHTTPRequestHandler):
     def _send_json(self, obj, code=200):
-        """Send a JSON response"""
         b = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -67,10 +124,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def log_message(self, format, *args):
-        """Redirect default HTTPServer logs to our logger"""
         log.info("%s - %s" % (self.address_string(), format % args))
 
-    # === Handle GET Requests ===
     def do_GET(self):
         if self.path.startswith("/index"):
             idx = refresh_index_from_disk(load_index())
@@ -96,16 +151,27 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             log.info(f"Sent file: {path} ({len(data)} bytes)")
 
+        elif self.path.startswith("/logs"):
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute("SELECT * FROM files_log ORDER BY timestamp DESC LIMIT 50;")
+                rows = cur.fetchall()
+                cur.close()
+                conn.close()
+                self._send_json({"logs": rows})
+            except Exception as e:
+                log.error(f"Failed to fetch logs: {e}")
+                self._send_json({"error": str(e)}, code=500)
+
         else:
             log.warning(f"Unknown GET path: {self.path}")
             self.send_error(404)
 
-    # === Handle POST Requests ===
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
 
-        # --- Upload ---
         if self.path == "/upload":
             meta_len = int(self.headers.get("X-Meta-Length", "0"))
             meta = json.loads(body[:meta_len].decode("utf-8"))
@@ -117,7 +183,6 @@ class Handler(BaseHTTPRequestHandler):
             idx = load_index()
             server_rec = idx.get(rel)
 
-            # Conflict check (base_sha differs from current server sha)
             if server_rec and server_rec["sha"] != meta.get("base_sha") and meta.get("base_sha"):
                 base, ext = os.path.splitext(rel)
                 conflict_rel = f'{base} (conflict @{int(time.time())}){ext}'
@@ -125,7 +190,6 @@ class Handler(BaseHTTPRequestHandler):
                     f.write(data)
                 log.warning(f"⚠️ Conflict detected: saved copy as '{conflict_rel}'")
 
-            # Write/overwrite the uploaded file
             with open(fp, "wb") as f:
                 f.write(data)
             sha = hashlib.sha256(data).hexdigest()
@@ -133,10 +197,10 @@ class Handler(BaseHTTPRequestHandler):
             ver = (server_rec["version"] + 1) if server_rec else 1
             idx[rel] = {"sha": sha, "mtime": st.st_mtime, "version": ver}
             save_index(idx)
+            log_to_db("upload", rel, ver, sha)
             log.info(f"⬆ File uploaded: {rel} (version {ver})")
             self._send_json({"ok": True, "version": ver, "sha": sha})
 
-        # --- Delete ---
         elif self.path == "/delete":
             req = json.loads(body.decode("utf-8"))
             rel = os.path.normpath(req["path"]).replace("\\", "/")
@@ -149,18 +213,19 @@ class Handler(BaseHTTPRequestHandler):
             if rel in idx:
                 del idx[rel]
                 save_index(idx)
-
+            log_to_db("delete", rel)
             self._send_json({"ok": True})
 
         else:
             log.warning(f"Unknown POST path: {self.path}")
             self.send_error(404)
 
-# === Server Entrypoint ===
+# === Entrypoint ===
 def main():
     os.makedirs(ROOT, exist_ok=True)
     save_index(refresh_index_from_disk(load_index()))
-    log.info("Server started on port 8080 – waiting for clients...")
+    init_db()
+    log.info("🚀 Server started on port 8080 – waiting for clients...")
     try:
         HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
     except KeyboardInterrupt:
