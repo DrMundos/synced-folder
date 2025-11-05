@@ -4,7 +4,8 @@
   "tags": ["sync", "postgres"],
   "timezone": "browser",
   "schemaVersion": 36,
-  "version": 3,
+  "version": 4,
+  "refresh": "1s",
   "panels": [
     {
       "type": "stat",
