@@ -4,7 +4,7 @@
   "tags": ["sync", "postgres"],
   "timezone": "browser",
   "schemaVersion": 36,
-  "version": 1,
+  "version": 3,
   "panels": [
     {
       "type": "stat",
@@ -43,16 +43,106 @@
           "refId": "C"
         }
       ],
-      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
-      "options": {
-        "showHeader": true
-      },
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 },
+      "options": { "showHeader": true },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" } } }
+    },
+    {
+      "type": "barchart",
+      "title": "Uploads vs Deletions Summary",
+      "datasource": "Postgres",
+      "targets": [
+        {
+          "rawSql": "SELECT action, COUNT(*) AS total FROM public.files_log GROUP BY action ORDER BY total DESC;",
+          "format": "table",
+          "refId": "D"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 10, "w": 6, "h": 6 },
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "align": "auto"
-          }
+          "color": { "mode": "palette-classic" },
+          "custom": { "align": "auto" }
         }
+      },
+      "options": { "orientation": "horizontal" }
+    },
+    {
+      "type": "table",
+      "title": "Top 10 Most Active Files",
+      "datasource": "Postgres",
+      "targets": [
+        {
+          "rawSql": "SELECT path, COUNT(*) AS changes FROM public.files_log GROUP BY path ORDER BY changes DESC LIMIT 10;",
+          "format": "table",
+          "refId": "E"
+        }
+      ],
+      "gridPos": { "x": 6, "y": 10, "w": 6, "h": 6 },
+      "options": { "showHeader": true },
+      "fieldConfig": { "defaults": { "custom": { "align": "left" } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Daily Activity Trend",
+      "datasource": "Postgres",
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', \"timestamp\") AS time, COUNT(*) AS total FROM public.files_log GROUP BY time ORDER BY time;",
+          "format": "time_series",
+          "refId": "F"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2 }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Last 24h Activity (per hour)",
+      "datasource": "Postgres",
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('hour', \"timestamp\") AS time, COUNT(*) AS total FROM public.files_log WHERE \"timestamp\" > NOW() - INTERVAL '24 hours' GROUP BY time ORDER BY time;",
+          "format": "time_series",
+          "refId": "G"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 22, "w": 12, "h": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1 }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Action Breakdown by Hour of Day",
+      "datasource": "Postgres",
+      "targets": [
+        {
+          "rawSql": "SELECT EXTRACT(HOUR FROM \"timestamp\") AS hour_of_day, action, COUNT(*) AS total FROM public.files_log GROUP BY hour_of_day, action ORDER BY hour_of_day;",
+          "format": "table",
+          "refId": "H"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 6 },
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "center" } }
       }
     }
   ]
