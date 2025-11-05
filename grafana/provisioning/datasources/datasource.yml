@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: Postgres
+    type: postgres
+    access: proxy
+    isDefault: true
+    editable: true
+    url: sync_postgres:5432
+    database: syncdb
+    user: syncuser
+    secureJsonData:
+      password: syncpass
+    jsonData:
+      sslmode: "disable"
