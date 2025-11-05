@@ -1,0 +1,216 @@
+{
+    "id": null,
+    "title": "📈 Synced Folder – Metrics Monitor",
+    "timezone": "browser",
+    "schemaVersion": 36,
+    "version": 1,
+    "refresh": "3s",
+    "tags": [
+        "sync",
+        "prometheus",
+        "postgres"
+    ],
+    "panels": [
+        {
+            "type": "stat",
+            "title": "Total Uploads",
+            "datasource": "Postgres",
+            "targets": [
+                {
+                    "rawSql": "SELECT COUNT(*) AS total_uploads FROM public.files_log WHERE action='upload';",
+                    "format": "table"
+                }
+            ],
+            "gridPos": {
+                "x": 0,
+                "y": 0,
+                "w": 4,
+                "h": 4
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Total Deletions",
+            "datasource": "Postgres",
+            "targets": [
+                {
+                    "rawSql": "SELECT COUNT(*) AS total_deletions FROM public.files_log WHERE action='delete';",
+                    "format": "table"
+                }
+            ],
+            "gridPos": {
+                "x": 4,
+                "y": 0,
+                "w": 4,
+                "h": 4
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Total Requests Served",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(sync_requests_total)",
+                    "legendFormat": "Total Requests"
+                }
+            ],
+            "gridPos": {
+                "x": 8,
+                "y": 0,
+                "w": 4,
+                "h": 4
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Uploads & Deletions (rate / min)",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "rate(sync_uploads_total[1m])",
+                    "legendFormat": "Uploads/min"
+                },
+                {
+                    "expr": "rate(sync_deletes_total[1m])",
+                    "legendFormat": "Deletes/min"
+                }
+            ],
+            "gridPos": {
+                "x": 0,
+                "y": 4,
+                "w": 12,
+                "h": 6
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "drawStyle": "lines",
+                        "fillOpacity": 40,
+                        "lineWidth": 2
+                    }
+                }
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom"
+                },
+                "tooltip": {
+                    "mode": "single"
+                }
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Request Rate (req/s)",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "rate(sync_requests_total[30s])",
+                    "legendFormat": "{{method}} {{endpoint}}"
+                }
+            ],
+            "gridPos": {
+                "x": 0,
+                "y": 10,
+                "w": 12,
+                "h": 6
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "drawStyle": "lines",
+                        "fillOpacity": 30,
+                        "lineWidth": 2
+                    }
+                }
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom"
+                },
+                "tooltip": {
+                    "mode": "multi"
+                }
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Request Latency (p95 + average)",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum(rate(sync_request_duration_seconds_bucket[1m])) by (le, endpoint))",
+                    "legendFormat": "p95 – {{endpoint}}"
+                },
+                {
+                    "expr": "avg(rate(sync_request_duration_seconds_sum[1m]) / rate(sync_request_duration_seconds_count[1m])) by (endpoint)",
+                    "legendFormat": "avg – {{endpoint}}"
+                }
+            ],
+            "gridPos": {
+                "x": 0,
+                "y": 16,
+                "w": 12,
+                "h": 6
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "unit": "s",
+                    "custom": {
+                        "drawStyle": "lines",
+                        "fillOpacity": 40,
+                        "lineWidth": 2
+                    }
+                }
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "list",
+                    "placement": "bottom"
+                },
+                "tooltip": {
+                    "mode": "multi"
+                }
+            }
+        },
+        {
+            "type": "table",
+            "title": "Recent Sync Actions (from Postgres)",
+            "datasource": "Postgres",
+            "targets": [
+                {
+                    "rawSql": "SELECT action, path, version, timestamp FROM public.files_log ORDER BY timestamp DESC LIMIT 50;",
+                    "format": "table"
+                }
+            ],
+            "gridPos": {
+                "x": 0,
+                "y": 22,
+                "w": 12,
+                "h": 6
+            },
+            "options": {
+                "showHeader": true
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {
+                        "align": "auto"
+                    }
+                }
+            }
+        }
+    ]
+}
