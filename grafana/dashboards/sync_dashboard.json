@@ -12,8 +12,9 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) FROM files_log WHERE action='upload';",
-          "format": "table"
+          "rawSql": "SELECT COUNT(*) AS total_uploads FROM public.files_log WHERE action='upload';",
+          "format": "table",
+          "refId": "A"
         }
       ],
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
@@ -24,26 +25,35 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) FROM files_log WHERE action='delete';",
-          "format": "table"
+          "rawSql": "SELECT COUNT(*) AS total_deletions FROM public.files_log WHERE action='delete';",
+          "format": "table",
+          "refId": "B"
         }
       ],
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
     },
     {
-      "type": "graph",
+      "type": "table",
       "title": "Sync Activity Over Time",
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT date_trunc('minute', created_at) AS time, COUNT(*) AS count FROM files_log GROUP BY time ORDER BY time;",
-          "format": "time_series"
+          "rawSql": "SELECT date_trunc('minute', \"timestamp\") AS time, action, COUNT(*) AS count FROM public.files_log GROUP BY time, action ORDER BY time;",
+          "format": "table",
+          "refId": "C"
         }
       ],
       "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
-      "lines": true,
-      "fill": 3,
-      "linewidth": 2
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        }
+      }
     }
   ]
 }

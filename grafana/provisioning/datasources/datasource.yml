@@ -5,11 +5,10 @@ datasources:
     type: postgres
     access: proxy
     isDefault: true
-    editable: true
-    url: sync_postgres:5432
-    database: syncdb
+    url: postgres:5432
     user: syncuser
     secureJsonData:
       password: syncpass
     jsonData:
-      sslmode: "disable"
+      database: syncdb
+      sslmode: disable
