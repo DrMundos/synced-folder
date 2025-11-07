@@ -1,0 +1,13 @@
+# ==============================
+# === Core Dependencies ===
+# ==============================
+psycopg2-binary==2.9.9          # PostgreSQL connector (binary build)
+prometheus-client==0.20.0       # Prometheus metrics exporter
+python-dotenv==1.0.1            # Load environment variables from .env
+requests==2.32.3                # HTTP client for optional integrations
+
+# ==============================
+# === Developer / QA Tools ===
+# ==============================
+pytest==8.3.2                   # Unit testing framework
+flake8==7.1.1                   # Linting and style checker

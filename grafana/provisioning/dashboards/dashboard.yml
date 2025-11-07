@@ -10,13 +10,3 @@ providers:
     updateIntervalSeconds: 5
     options:
       path: /var/lib/grafana/dashboards
-
-  - name: "Synced Folder"
-    orgId: 1
-    folder: ""
-    type: file
-    disableDeletion: false
-    editable: true
-    updateIntervalSeconds: 5
-    options:
-      path: /var/lib/grafana/dashboards
