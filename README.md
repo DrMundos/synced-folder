@@ -22,27 +22,42 @@ It includes a lightweight server, client, and optional PostgreSQL + Grafana inte
 🧰 Project Structure
 synced-folder/
 │
-├── server/
-│   └── server.py          # HTTP server handling uploads, downloads, and file index
+├── src/                    # Main application source code
+│   ├── server/
+│   │   ├── __init__.py
+│   │   └── server.py      # HTTP server handling uploads, downloads, and file index
+│   ├── client/
+│   │   ├── __init__.py
+│   │   └── client.py      # Watches local folder, syncs with the server
+│   └── config/
+│       ├── __init__.py
+│       └── settings.py    # Configuration settings
 │
-├── client/
-│   └── client.py          # Watches local folder, syncs with the server
-│
-├── grafana/
-│   ├── provisioning/
-│   │   ├── datasources/
-│   │   │   └── datasource.yml
+├── infrastructure/        # Infrastructure and deployment files
+│   ├── docker/
+│   │   ├── Dockerfile     # Shared build for both server and client
+│   │   └── docker-compose.yml  # Multi-container setup
+│   ├── grafana/
+│   │   ├── provisioning/
+│   │   │   ├── datasources/
+│   │   │   │   └── datasource.yml
+│   │   │   └── dashboards/
+│   │   │       └── dashboard.yml
 │   │   └── dashboards/
-│   │       └── dashboard.yml
-│   └── dashboards/
-│       └── sync_dashboard.json
+│   │       └── sync_dashboard.json
+│   └── prometheus/
+│       └── prometheus.yml
 │
-├── docker-compose.yml     # Multi-container setup for client, server, PostgreSQL, and Grafana
-├── Dockerfile             # Shared build for both server and client
-└── README.md
+├── tests/                 # Test files (future)
+├── storage/               # Server storage directory (runtime, gitignored)
+├── synced/                # Client synced folder (runtime, gitignored)
+├── requirements.txt       # Python dependencies
+├── README.md
+└── LICENSE
 
 🚀 Quick Start (Docker Setup)
 1️⃣ Build and start all containers
+cd infrastructure/docker
 docker compose up --build
 
 
@@ -60,13 +75,13 @@ This launches:
 Component	URL	Default Credentials
 Server API	http://localhost:8080
 	N/A
-Client Synced Folder	./client/synced/	Files auto-sync
+Client Synced Folder	./synced/	Files auto-sync
 Grafana Dashboard	http://localhost:3030
 	admin / admin
 3️⃣ Test synchronization
 
-Add or edit files inside client/synced/
-→ They’ll automatically upload to the server and appear in the server/storage/ folder.
+Add or edit files inside synced/
+→ They'll automatically upload to the server and appear in the storage/ folder.
 
 Deletions or modifications will propagate both ways.
 
@@ -106,11 +121,11 @@ The server maintains version history and logs actions in PostgreSQL.
 
 🧪 Example Workflow
 
-Run docker compose up
+Run docker compose up from infrastructure/docker/
 
-Drop example.txt into client/synced/
+Drop example.txt into synced/
 
-The file appears in server/storage/
+The file appears in storage/
 
 PostgreSQL logs the upload
 
