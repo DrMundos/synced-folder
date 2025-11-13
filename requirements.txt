@@ -1,13 +1,153 @@
-# ==============================
-# === Core Dependencies ===
-# ==============================
-psycopg2-binary==2.9.9          # PostgreSQL connector (binary build)
-prometheus-client==0.20.0       # Prometheus metrics exporter
-python-dotenv==1.0.1            # Load environment variables from .env
-requests==2.32.3                # HTTP client for optional integrations
+📋 Project Overview
+This is a file synchronization system built in Python, designed as a local Dropbox-like service with client-server architecture. The project includes monitoring with Prometheus and Grafana, and uses Docker for easy deployment.
+🏗️ Architecture Components
+1. Server (server/server.py)
+The HTTP server that manages file storage and synchronization.
+Key Functions:
+get_db(retries=10, delay=3): Establishes PostgreSQL connection with retry logic for database reliability.
+init_db(): Creates the files_log table in PostgreSQL to track all sync operations (uploads, deletes, versions, hashes).
+log_to_db(action, path, version=None, sha=None): Records sync events in the database for monitoring and auditing.
+sha256_of_file(path): Calculates SHA256 hash of files for integrity checking (used by both client and server).
+load_index(): Loads the file index from .index.json in the storage directory.
+save_index(idx): Persists the file index to disk.
+refresh_index(idx): Rebuilds the file index by scanning the storage directory and updating hashes/versions.
+HTTP Handler Class (Handler):
+_send_json(obj, code=200): Utility to send JSON responses with proper headers.
+_track(method, endpoint, start): Records HTTP request metrics for Prometheus monitoring.
+do_GET(): Handles GET requests for:
+/index: Returns current file index with metadata
+/download?path=...: Downloads specific files
+/logs: Returns recent sync activity from database
+do_POST(): Handles POST requests for:
+/upload: Receives file uploads with conflict detection
+/delete: Removes files from server storage
+main(): Server entry point that initializes storage, database, starts metrics server, and runs the HTTP server.
+2. Client (client/client.py)
+The client that monitors local directories and syncs with the server.
+Key Functions:
+sha256_of_file(path): Same as server - calculates file hashes for comparison.
+local_index(): Builds index of all local files with hashes and modification times.
+Server Communication:
+get_server_index(): Fetches current file index from server.
+download_file(path): Downloads missing or outdated files from server.
+upload_file(path, base_sha): Uploads new/changed files to server with conflict detection.
+delete_on_server(path): Notifies server to delete files that were removed locally.
+State Management:
+load_state(): Loads previous file list from .local_state.json to detect deletions.
+save_state(files_list): Saves current file list for future comparison.
+Sync Logic:
+sync_once(): Main synchronization function that:
+Detects locally deleted files and removes them from server
+Uploads new or modified local files
+Downloads missing or outdated files from server
+Updates local state tracking
+main(): Client entry point that runs continuous sync loop every SCAN_INTERVAL seconds.
+3. Configuration (config/settings.py)
+Central configuration management using environment variables.
+Database Settings:
+PostgreSQL connection parameters (host, database, user, password)
+Server Settings:
+Host/port configuration for the sync server
+Prometheus metrics port
+Client Settings:
+Local sync directory path
+Scan interval for checking changes
+State file location
+4. Monitoring & Observability
+Prometheus Metrics (in server):
+UPLOADS: Counter for total uploaded files
+DELETES: Counter for total deleted files
+REQUESTS: Counter for HTTP requests by method/endpoint
+LATENCY: Histogram for request response times
+Grafana Dashboards:
+Visualizes sync activity over time
+Shows upload/delete statistics
+Charts activity trends from PostgreSQL data
+5. Docker Deployment (docker-compose.yml)
+Multi-container setup including:
+PostgreSQL: Database for sync logs
+Server: Python HTTP server with metrics
+Client: File watcher and sync client
+Grafana: Dashboard visualization
+Prometheus: Metrics collection
+Postgres Exporter: Database metrics
+🔧 Core Synchronization Algorithm
+Client scans local directory and builds file index with SHA256 hashes
+Compares with server index to detect changes
+Uploads new/modified files with version conflict detection
+Downloads missing/outdated files from server
+Propagates local deletions to server
+Tracks state to detect file deletions between scans
+🧪 Testing
+Current State: No test files are present in the project. The requirements.txt includes pytest==8.3.2 for testing, but no actual test suites exist.
+Recommended Test Coverage:
+Unit tests for sha256_of_file() function
+Integration tests for upload/download operations
+Mock tests for HTTP server endpoints
+Conflict resolution testing
+Database logging verification
+📊 Key Features
+✅ Automatic bidirectional sync between client and server
+✅ Conflict detection with timestamp-based resolution
+✅ Version tracking with SHA256 integrity checks
+✅ Deletion propagation in both directions
+✅ Database logging of all operations
+✅ Prometheus metrics for monitoring
+✅ Grafana dashboards for visualization
+✅ Docker containerization for easy deployment
+✅ Standard library core (no external deps for sync logic)
+⚠️ Limitations (as noted in README)
+No authentication or encryption
+No large file chunking
+No distributed conflict resolution
+Simplified demo implementation
+🚀 Usage
+The system runs via Docker Compose with all services orchestrated together. Files placed in the client's synced/ directory automatically sync to the server's storage/ folder, with full monitoring and visualization capabilities.
+This is a well-architected educational project demonstrating real-world distributed systems concepts like file synchronization, conflict resolution, monitoring, and container orchestration.
 
-# ==============================
-# === Developer / QA Tools ===
-# ==============================
-pytest==8.3.2                   # Unit testing framework
-flake8==7.1.1                   # Linting and style checker
+
+🏗️ Project Hierarchy Structure
+synced-folder/├── 📁 client/│   └── client.py              # Client-side sync logic├── 📁 config/│   ├── __init__.py           # Package initialization│   └── settings.py           # Configuration management├── 📁 server/│   └── server.py             # Server-side HTTP handler├── 📁 grafana/│   ├── 📁 dashboards/│   │   ├── sync_dashboard.json       # Grafana dashboard config│   │   └── synced-folder-metrics.json # Metrics visualization│   └── 📁 provisioning/│       ├── 📁 dashboards/│       │   └── dashboard.yml         # Dashboard provisioning│       └── 📁 datasources/│           └── datasource.yml        # Data source configuration├── 📁 prometheus/│   └── prometheus.yml         # Prometheus scraping config├── docker-compose.yml         # Multi-container orchestration├── Dockerfile                 # Container build instructions├── requirements.txt           # Python dependencies├── README.md                  # Project documentation└── LICENSE                    # MIT License
+🔄 System Flow Architecture
+High-Level Data Flow
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐│   Local Files   │────│   Sync Client    │────│   HTTP Server   ││   (synced/)     │    │   (client.py)    │    │   (server.py)   │└─────────────────┘    └──────────────────┘    └─────────────────┘         │                       │                       │         │                       │                       │         ▼                       ▼                       ▼┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐│  File Changes   │────│  Sync Operations │────│   Storage       ││  Detection      │    │  (Upload/Download│    │   (storage/)    │└─────────────────┘    │   /Delete)       │    └─────────────────┘                       └──────────────────┘            │                                                       │                                                       ▼                                            ┌─────────────────┐                                            │   PostgreSQL    │                                            │   (files_log)   │                                            └─────────────────┘                                                       │                                                       ▼                                            ┌─────────────────┐                                            │   Monitoring    │                                            │ Prometheus +    │                                            │   Grafana       │                                            └─────────────────┘
+📋 Detailed Component Flow
+1. Client Synchronization Flow
+Client Startup     ↓Initialize Local Directory (synced/)     ↓┌─────────────────────────────────────┐│         Continuous Loop             ││  (Every SCAN_INTERVAL seconds)      │├─────────────────────────────────────┤│                                     ││  1. Get Server Index (/index)      ││     ↓                              ││  2. Build Local Index              ││     ↓                              ││  3. Detect Deletions               ││     (prev_files - curr_files)       ││     ↓                              ││  4. Delete on Server (/delete)     ││     ↓                              ││  5. Upload Changes (/upload)       ││     ↓                              ││  6. Download Missing (/download)   ││     ↓                              ││  7. Update Local State             ││                                     │└─────────────────────────────────────┘     ↓Wait SCAN_INTERVAL seconds     ↓Repeat
+2. Server Request Processing Flow
+HTTP Request Received     ↓Route Determination     ↓├── GET /index│   ↓│   Refresh File Index│   ↓│   Return JSON Index│├── GET /download?path=X│   ↓│   Validate Path Security│   ↓│   Stream File Content│├── GET /logs│   ↓│   Query PostgreSQL│   ↓│   Return Activity Logs│├── POST /upload│   ↓│   Parse Metadata + Data│   ↓│   Conflict Detection│   ↓│   Save File + Update Index│   ↓│   Log to Database│└── POST /delete    ↓    Validate Path    ↓    Remove File    ↓    Update Index    ↓    Log to Database
+3. Conflict Resolution Flow
+File Upload Request     ↓Extract base_sha from metadata     ↓Check if file exists on server     ↓┌─────────────────────────────────────┐│          Server File Exists?        │├─────────────────────────────────────┤│                                     ││  YES: Compare base_sha with         ││       current server sha            ││       ↓                             ││       ┌─────────────────────────┐   ││       │   SHAs Match?           │   ││       ├─────────────────────────┤   ││       │                         │   ││       │  YES: Normal Upload     │   ││       │                         │   ││       │  NO:  Create Conflict   │   ││       │       File (timestamped)│   ││       └─────────────────────────┘   ││                                     ││  NO:  Normal Upload (new file)     ││                                     │└─────────────────────────────────────┘
+4. Monitoring & Metrics Flow
+Sync Operation     ↓Server Processes Request     ↓Update Prometheus Counters     ↓Log to PostgreSQL (files_log)     ↓┌─────────────────────────────────────┐│         Prometheus Scrapes         ││         Server Metrics             │├─────────────────────────────────────┤│                                     ││  • sync_uploads_total              ││  • sync_deletes_total              ││  • sync_requests_total             ││  • sync_request_duration_seconds   ││                                     │└─────────────────────────────────────┘     ↓Grafana Queries PostgreSQL     ↓Visualize in Dashboard
+🔗 Component Dependencies
+Docker Compose     ↓├── PostgreSQL Container│   ↓│   └── Server (depends_on postgres)│       ↓│       ├── Client (depends_on server)│       ├── Prometheus (depends_on server)│       └── Grafana (depends_on prometheus)│├── Postgres Exporter (depends_on postgres)└── Grafana (depends_on prometheus)
+📊 Data Flow Between Components
+File Synchronization Data Flow:
+Client → Server (Upload):
+   Local File → SHA256 Hash → HTTP POST /upload →    Server Validation → Conflict Check → File Storage →    Index Update → Database Log → Metrics Update
+Server → Client (Download):
+   Server Index → HTTP GET /download → File Stream →    Local Storage → State Update
+Client → Server (Deletion):
+   Local Deletion Detection → HTTP POST /delete →    Server File Removal → Index Update → Database Log
+🧩 Key Design Patterns
+Observer Pattern (Client)
+Client continuously observes local directory changes
+Periodically polls server for index updates
+Repository Pattern (Server)
+File index acts as in-memory repository
+PostgreSQL serves as persistent audit log
+Mediator Pattern (HTTP Server)
+Server mediates communication between multiple clients
+Handles conflict resolution and version management
+Strategy Pattern (Sync Logic)
+Different sync strategies for upload/download/delete
+Pluggable conflict resolution mechanisms
+🔄 State Management
+Client State:
+.local_state.json├── files: [list of current files]└── Used to detect deletions between scans
+Server State:
+.index.json├── file_path: {│   ├── sha: "hash_value"│   ├── mtime: timestamp│   └── version: integer└── }
+Database State:
+files_log table├── id (SERIAL)├── action ('upload'|'delete')├── path (TEXT)├── version (INT, nullable)├── sha (TEXT, nullable)└── timestamp (TIMESTAMP)
+This hierarchical structure and flow shows how your Synced Folder project implements a robust file synchronization system with monitoring capabilities. The design follows clean separation of concerns with the client handling local file watching, the server managing storage and conflict resolution, and the monitoring stack providing observability.
