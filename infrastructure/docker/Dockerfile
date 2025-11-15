@@ -23,8 +23,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ==============================
 COPY . .
 
-# Make sure Python can find packages from /app (so "from config import ..." works)
-ENV PYTHONPATH=/app
+# Make sure Python can find packages from /app/src (so "from config import ..." works)
+ENV PYTHONPATH=/app/src
 
 # ==============================
 # 5️⃣ Default environment variables
@@ -37,4 +37,4 @@ ENV SCAN_INTERVAL=3
 # 6️⃣ Default command (server)
 # ==============================
 # This can be overridden by docker-compose (for client container)
-CMD ["python", "server/server.py"]
+CMD ["python", "-m", "server.server"]

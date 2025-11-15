@@ -20,17 +20,17 @@ services:
   # === Sync Server (with Prometheus metrics on port 8000) ===
   server:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile
     container_name: sync_server
-    command: ["python", "server/server.py"]
+    command: ["python", "-m", "server.server"]
     environment:
       - DB_HOST=postgres
       - DB_USER=syncuser
       - DB_PASS=syncpass
       - DB_NAME=syncdb
     volumes:
-      - ./storage:/app/storage
+      - ../../storage:/app/storage
     depends_on:
       - postgres
     ports:
@@ -42,14 +42,14 @@ services:
   # === Sync Client ===
   client:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile
     container_name: sync_client
-    command: ["python", "client/client.py"]
+    command: ["python", "-m", "client.client"]
     environment:
       - SERVER=http://server:8080
     volumes:
-      - ./synced:/app/synced
+      - ../../synced:/app/synced
     depends_on:
       - server
     networks:
@@ -66,8 +66,8 @@ services:
     ports:
       - "3030:3000"
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ../grafana/provisioning:/etc/grafana/provisioning
+      - ../grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
     networks:
@@ -81,7 +81,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
       - syncnet
     depends_on:
