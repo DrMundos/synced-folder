@@ -1,10 +1,7 @@
-version: "3.9"
-
 services:
   # === PostgreSQL Database ===
   postgres:
     image: postgres:15
-    container_name: sync_postgres
     restart: always
     environment:
       POSTGRES_USER: syncuser
@@ -13,16 +10,15 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5433:5432"  # access from host if needed
+      - "5433:5432"
     networks:
       - syncnet
 
-  # === Sync Server (with Prometheus metrics on port 8000) ===
+  # === Sync Server ===
   server:
     build:
       context: ../..
       dockerfile: infrastructure/docker/Dockerfile
-    container_name: sync_server
     command: ["python", "-m", "server.server"]
     environment:
       - DB_HOST=postgres
@@ -34,31 +30,44 @@ services:
     depends_on:
       - postgres
     ports:
-      - "8080:8080"  # HTTP sync API
-      - "8000:8000"  # Prometheus metrics
+      - "8080:8080"
+      - "8000:8000"
     networks:
       - syncnet
 
-  # === Sync Client ===
-  client:
+  # === Sync Client 1 ===
+  client1:
     build:
       context: ../..
       dockerfile: infrastructure/docker/Dockerfile
-    container_name: sync_client
     command: ["python", "-m", "client.client"]
     environment:
       - SERVER=http://server:8080
     volumes:
-      - ../../synced:/app/synced
+      - ../../synced1:/app/synced
     depends_on:
       - server
     networks:
       - syncnet
 
-  # === Grafana Dashboard ===
+  # === Sync Client 2 ===
+  client2:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile
+    command: ["python", "-m", "client.client"]
+    environment:
+      - SERVER=http://server:8080
+    volumes:
+      - ../../synced2:/app/synced
+    depends_on:
+      - server
+    networks:
+      - syncnet
+
+  # === Grafana ===
   grafana:
     image: grafana/grafana:latest
-    container_name: sync_grafana
     restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_USER=admin
@@ -73,27 +82,25 @@ services:
     networks:
       - syncnet
 
-  # === Prometheus Metrics Collector ===
+  # === Prometheus ===
   prometheus:
     image: prom/prometheus:latest
-    container_name: sync_prometheus
     restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
       - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    networks:
-      - syncnet
     depends_on:
       - server
+    networks:
+      - syncnet
 
-  # === Postgres Exporter (optional) ===
+  # === Postgres Exporter ===
   postgres_exporter:
     image: prometheuscommunity/postgres-exporter:latest
-    container_name: sync_postgres_exporter
     restart: unless-stopped
     environment:
-      DATA_SOURCE_NAME: "postgresql://syncuser:syncpass@sync_postgres:5432/syncdb?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://syncuser:syncpass@postgres:5432/syncdb?sslmode=disable"
     ports:
       - "9187:9187"
     depends_on:
@@ -101,11 +108,20 @@ services:
     networks:
       - syncnet
 
-# === Volumes ===
+  tests:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile
+    command: ["pytest", "-v"]
+    depends_on:
+      - server
+    networks:
+      - syncnet
+
+
 volumes:
   pgdata:
 
-# === Networks ===
 networks:
   syncnet:
     driver: bridge
