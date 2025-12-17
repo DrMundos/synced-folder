@@ -1,23 +1,27 @@
 {
   "id": null,
+  "uid": "synced-folder-activity",
   "title": "📊 Synced Folder Activity",
-  "tags": ["sync", "postgres"],
+  "tags": ["sync", "postgres", "files"],
   "timezone": "browser",
   "schemaVersion": 36,
-  "version": 4,
-  "refresh": "1s",
+  "version": 1,
+  "refresh": "5s",
   "panels": [
     {
       "type": "stat",
-      "title": "Total Uploads",
+      "title": "Total Updates",
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS total_uploads FROM public.files_log WHERE action='upload';",
+          "rawSql": "SELECT COUNT(*) AS total_updates FROM public.files_log WHERE action = 'UPDATE';",
           "format": "table",
           "refId": "A"
         }
       ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false }
+      },
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
     },
     {
@@ -26,31 +30,36 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS total_deletions FROM public.files_log WHERE action='delete';",
+          "rawSql": "SELECT COUNT(*) AS total_deletions FROM public.files_log WHERE action = 'DELETE';",
           "format": "table",
           "refId": "B"
         }
       ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false }
+      },
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
     },
     {
-      "type": "table",
-      "title": "Sync Activity Over Time",
+      "type": "timeseries",
+      "title": "Activity Over Time (by Action)",
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT date_trunc('minute', \"timestamp\") AS time, action, COUNT(*) AS count FROM public.files_log GROUP BY time, action ORDER BY time;",
-          "format": "table",
+          "rawSql": "SELECT $__time(timestamp), action, COUNT(*) AS total FROM public.files_log GROUP BY 1, action ORDER BY 1;",
+          "format": "time_series",
           "refId": "C"
         }
       ],
-      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 },
-      "options": { "showHeader": true },
-      "fieldConfig": { "defaults": { "custom": { "align": "auto" } } }
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      },
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 }
     },
     {
       "type": "barchart",
-      "title": "Uploads vs Deletions Summary",
+      "title": "Updates vs Deletions",
       "datasource": "Postgres",
       "targets": [
         {
@@ -59,14 +68,11 @@
           "refId": "D"
         }
       ],
-      "gridPos": { "x": 0, "y": 10, "w": 6, "h": 6 },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "align": "auto" }
-        }
+      "options": {
+        "orientation": "horizontal",
+        "legend": { "displayMode": "hidden" }
       },
-      "options": { "orientation": "horizontal" }
+      "gridPos": { "x": 0, "y": 10, "w": 6, "h": 6 }
     },
     {
       "type": "table",
@@ -79,9 +85,8 @@
           "refId": "E"
         }
       ],
-      "gridPos": { "x": 6, "y": 10, "w": 6, "h": 6 },
       "options": { "showHeader": true },
-      "fieldConfig": { "defaults": { "custom": { "align": "left" } } }
+      "gridPos": { "x": 6, "y": 10, "w": 6, "h": 6 }
     },
     {
       "type": "timeseries",
@@ -89,45 +94,33 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT date_trunc('day', \"timestamp\") AS time, COUNT(*) AS total FROM public.files_log GROUP BY time ORDER BY time;",
+          "rawSql": "SELECT $__time(date_trunc('day', timestamp)), COUNT(*) AS total FROM public.files_log GROUP BY 1 ORDER BY 1;",
           "format": "time_series",
           "refId": "F"
         }
       ],
-      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 6 },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2 }
-        }
-      },
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
         "tooltip": { "mode": "single" }
-      }
+      },
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 6 }
     },
     {
       "type": "timeseries",
-      "title": "Last 24h Activity (per hour)",
+      "title": "Last 24 Hours Activity (Hourly)",
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT date_trunc('hour', \"timestamp\") AS time, COUNT(*) AS total FROM public.files_log WHERE \"timestamp\" > NOW() - INTERVAL '24 hours' GROUP BY time ORDER BY time;",
+          "rawSql": "SELECT $__time(date_trunc('hour', timestamp)), COUNT(*) AS total FROM public.files_log WHERE timestamp > NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1;",
           "format": "time_series",
           "refId": "G"
         }
       ],
-      "gridPos": { "x": 0, "y": 22, "w": 12, "h": 6 },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1 }
-        }
-      },
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
         "tooltip": { "mode": "single" }
-      }
+      },
+      "gridPos": { "x": 0, "y": 22, "w": 12, "h": 6 }
     },
     {
       "type": "table",
@@ -135,16 +128,13 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT EXTRACT(HOUR FROM \"timestamp\") AS hour_of_day, action, COUNT(*) AS total FROM public.files_log GROUP BY hour_of_day, action ORDER BY hour_of_day;",
+          "rawSql": "SELECT EXTRACT(HOUR FROM timestamp) AS hour_of_day, action, COUNT(*) AS total FROM public.files_log GROUP BY hour_of_day, action ORDER BY hour_of_day;",
           "format": "table",
           "refId": "H"
         }
       ],
-      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 6 },
       "options": { "showHeader": true },
-      "fieldConfig": {
-        "defaults": { "custom": { "align": "center" } }
-      }
+      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 6 }
     }
   ]
 }
