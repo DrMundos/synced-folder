@@ -1,283 +1,315 @@
-import os, json, hashlib, time, urllib.parse, logging, threading
+import json
+import os
+import time
+import hashlib
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from psycopg2 import OperationalError
 
-from prometheus_client import start_http_server, Counter, Histogram
-from config.settings import POSTGRES, SERVER_PORT, METRICS_PORT
+from config.settings import POSTGRES, SERVER_PORT, STORAGE_DIR
 
 
-# ==============================
-# Logging
-# ==============================
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s: %(message)s",
-    datefmt="%H:%M:%S"
-)
-log = logging.getLogger("SyncServer")
-
-
-# ==============================
-# Metrics
-# ==============================
-UPLOADS   = Counter("sync_uploads_total", "Total uploaded files")
-DELETES   = Counter("sync_deletes_total", "Total deleted files")
-CONFLICTS = Counter("sync_conflicts_total", "Total file conflicts")
-REQUESTS  = Counter("sync_requests_total", "HTTP requests", ["method", "endpoint"])
-LATENCY   = Histogram("sync_request_duration_seconds", "Request latency", ["endpoint"])
-
-
-# ==============================
-# Paths
-# ==============================
-ROOT = os.path.abspath("storage")
-INDEX_FILE = os.path.join(ROOT, ".index.json")
-
-
-# ==============================
-# DB helpers
-# ==============================
-def get_db(retries=10, delay=3):
-    for _ in range(retries):
-        try:
-            return psycopg2.connect(**POSTGRES)
-        except OperationalError:
-            time.sleep(delay)
-    raise RuntimeError("PostgreSQL unavailable")
-
-
-def init_db():
-    with get_db() as conn, conn.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS files_log (
-                id SERIAL PRIMARY KEY,
-                action VARCHAR(20),
-                path TEXT,
-                version INT,
-                sha TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-    log.info("Database ready")
-
-
-def log_event(action, path, version=None, sha=None):
-    with get_db() as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO files_log (action, path, version, sha) VALUES (%s, %s, %s, %s)",
-            (action, path, version, sha)
+def get_db():
+    try:
+        return psycopg2.connect(
+            host=POSTGRES["host"],
+            port=POSTGRES["port"],
+            user=POSTGRES["user"],
+            password=POSTGRES["password"],
+            dbname=POSTGRES["dbname"]
         )
+    except psycopg2.OperationalError as e:
+        print(f"[DB ERROR] Connection failed: {e}")
+        raise
 
 
-def conflict_already_logged(path, sha):
-    with get_db() as conn, conn.cursor() as cur:
+def hash_file(path):
+    """Calculate SHA256 hash of a file."""
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception as e:
+        print(f"[HASH ERROR] Failed to hash {path}: {e}")
+        return None
+
+
+# Global variable to track recently written files (used by watch_storage)
+_recently_written_files = {}
+
+def write_file_to_storage(path, content):
+    """Write file content to server's storage directory."""
+    try:
+        full_path = os.path.join(STORAGE_DIR, path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        
+        # Calculate hash and track it so watch_storage doesn't immediately detect it
+        file_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        _recently_written_files[path] = file_hash
+        
+        print(f"[SERVER] Wrote file to storage: {path}")
+    except Exception as e:
+        print(f"[STORAGE ERROR] Failed to write {path}: {e}")
+
+
+def delete_file_from_storage(path):
+    """Delete file from server's storage directory."""
+    try:
+        full_path = os.path.join(STORAGE_DIR, path)
+        if os.path.exists(full_path):
+            os.remove(full_path)
+            # Remove empty parent directories
+            parent = os.path.dirname(full_path)
+            while parent != STORAGE_DIR and parent != os.path.dirname(STORAGE_DIR):
+                try:
+                    if not os.listdir(parent):
+                        os.rmdir(parent)
+                        parent = os.path.dirname(parent)
+                    else:
+                        break
+                except:
+                    break
+            print(f"[SERVER] Deleted file from storage: {path}")
+    except Exception as e:
+        print(f"[STORAGE ERROR] Failed to delete {path}: {e}")
+
+
+def save_event(path, file_hash, deleted, client, content=None):
+    """Save event to database and update server storage."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        # Try with RETURNING event_id first, fall back to id if needed
+        try:
+            cur.execute("""
+                INSERT INTO file_events (path, hash, deleted, client, content)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING event_id
+            """, (path, file_hash, deleted, client, content))
+            event_id = cur.fetchone()[0]
+        except psycopg2.ProgrammingError:
+            # If event_id doesn't exist, try with id
+            try:
+                cur.execute("""
+                    INSERT INTO file_events (path, hash, deleted, client, content)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (path, file_hash, deleted, client, content))
+                event_id = cur.fetchone()[0]
+            except psycopg2.ProgrammingError:
+                # If RETURNING is not supported or column doesn't exist, just insert
+                cur.execute("""
+                    INSERT INTO file_events (path, hash, deleted, client, content)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (path, file_hash, deleted, client, content))
+                event_id = None
+        conn.commit()
+        conn.close()
+        
+        # Update server storage (but not if event came from server itself)
+        if client != "SERVER":
+            if deleted:
+                delete_file_from_storage(path)
+            elif content is not None:
+                write_file_to_storage(path, content)
+        
+        return event_id
+    except Exception as e:
+        print(f"[DB ERROR] Failed to save event: {e}")
+        raise
+
+
+def init_database():
+    """Initialize database table if it doesn't exist."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        # Create table if it doesn't exist
         cur.execute("""
-            SELECT 1 FROM files_log
-            WHERE action='conflict' AND path=%s AND sha=%s
-            LIMIT 1
-        """, (path, sha))
-        return cur.fetchone() is not None
+            CREATE TABLE IF NOT EXISTS file_events (
+                event_id SERIAL PRIMARY KEY,
+                path TEXT NOT NULL,
+                hash TEXT,
+                deleted BOOLEAN DEFAULT FALSE,
+                client TEXT,
+                content TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        conn.close()
+        print("[SERVER] Database table initialized")
+    except Exception as e:
+        print(f"[DB ERROR] Failed to initialize database: {e}")
 
 
-# ==============================
-# Index helpers
-# ==============================
-def load_index():
-    if not os.path.exists(INDEX_FILE):
-        return {}
-    with open(INDEX_FILE) as f:
-        return json.load(f)
+def get_events(since_event_id):
+    """Get events from database since the given event_id."""
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        # Try event_id first, fall back to id if event_id doesn't exist
+        try:
+            cur.execute("""
+                SELECT event_id, path, hash, deleted, content, client
+                FROM file_events
+                WHERE event_id > %s
+                ORDER BY event_id ASC
+            """, (since_event_id,))
+        except psycopg2.ProgrammingError:
+            # If event_id column doesn't exist, use id
+            cur.execute("""
+                SELECT id as event_id, path, hash, deleted, content, client
+                FROM file_events
+                WHERE id > %s
+                ORDER BY id ASC
+            """, (since_event_id,))
+        rows = cur.fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"[DB ERROR] Failed to get events: {e}")
+        return []
 
 
-def save_index(idx):
-    with open(INDEX_FILE, "w") as f:
-        json.dump(idx, f, indent=2)
+def watch_storage():
+    """Watch server's storage directory and create events for changes."""
+    global _recently_written_files
+    known = {}
+    
+    while True:
+        try:
+            current = {}
+            
+            if os.path.exists(STORAGE_DIR):
+                for root, _, files in os.walk(STORAGE_DIR):
+                    for f in files:
+                        abs_path = os.path.join(root, f)
+                        rel = os.path.relpath(abs_path, STORAGE_DIR)
+                        
+                        # Skip hidden/system files
+                        if rel.startswith('.'):
+                            continue
+                        
+                        h = hash_file(abs_path)
+                        if h:
+                            current[rel] = h
+                            
+                            # If file is new or changed, create event
+                            # But skip if we just wrote it (check _recently_written_files)
+                            if rel not in known or known[rel] != h:
+                                # Check if this file was recently written by save_event
+                                if rel in _recently_written_files and _recently_written_files[rel] == h:
+                                    # This was written by us, skip it this cycle
+                                    known[rel] = h  # Update known so we don't process it again
+                                    # Remove from tracking after one cycle
+                                    _recently_written_files.pop(rel, None)
+                                    continue
+                                
+                                try:
+                                    with open(abs_path, "r", encoding="utf-8") as fh:
+                                        content = fh.read()
+                                    save_event(
+                                        path=rel,
+                                        file_hash=h,
+                                        deleted=False,
+                                        client="SERVER",
+                                        content=content
+                                    )
+                                    print(f"[SERVER] Detected change in storage: {rel}")
+                                except Exception as e:
+                                    print(f"[STORAGE WATCH ERROR] Failed to process {rel}: {e}")
+            
+            # Check for deleted files
+            for rel in known:
+                if rel not in current:
+                    # Don't create delete event if we just deleted it ourselves
+                    if rel not in _recently_written_files:
+                        save_event(
+                            path=rel,
+                            file_hash=None,
+                            deleted=True,
+                            client="SERVER",
+                            content=None
+                        )
+                        print(f"[SERVER] Detected deletion in storage: {rel}")
+            
+            known = current
+        except Exception as e:
+            print(f"[STORAGE WATCH ERROR] {e}")
+        
+        time.sleep(3)
 
 
-# ==============================
-# Utilities
-# ==============================
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+class SyncHandler(BaseHTTPRequestHandler):
 
-
-def safe_path(rel_path: str) -> str:
-    rel = os.path.normpath(rel_path).replace("\\", "/")
-    return os.path.join(ROOT, rel)
-
-
-# ==============================
-# HTTP Handler
-# ==============================
-class Handler(BaseHTTPRequestHandler):
-
-    def json_response(self, payload, code=200):
-        body = json.dumps(payload).encode()
+    def _json(self, code, payload):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(json.dumps(payload).encode())
 
-    def track(self, method, endpoint, start):
-        REQUESTS.labels(method, endpoint).inc()
-        LATENCY.labels(endpoint).observe(time.time() - start)
-
-    # -------- GET --------
-    def do_GET(self):
-        start = time.time()
-        try:
-            if self.path.startswith("/index"):
-                idx = load_index()
-                self.json_response({"index": idx, "ts": time.time()})
-                self.track("GET", "/index", start)
-
-            elif self.path.startswith("/download"):
-                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                path = qs.get("path", [""])[0]
-                fp = safe_path(path)
-
-                if not fp.startswith(ROOT) or not os.path.exists(fp):
-                    self.send_error(404)
-                    return
-
-                with open(fp, "rb") as f:
-                    data = f.read()
-
-                self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-
-                self.track("GET", "/download", start)
-
-            elif self.path.startswith("/logs"):
-                with get_db() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute(
-                        "SELECT * FROM files_log ORDER BY timestamp DESC LIMIT 50"
-                    )
-                    self.json_response({"logs": cur.fetchall()})
-                self.track("GET", "/logs", start)
-
-            else:
-                self.send_error(404)
-
-        except Exception as e:
-            log.error(f"GET error: {e}")
-            self.send_error(500)
-        finally:
-            self.track("GET", "done", start)
-
-    # -------- POST --------
     def do_POST(self):
-        start = time.time()
+        if self.path != "/event":
+            return self._json(404, {"error": "not found"})
+
         try:
             length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length)
-
-            if self.path == "/upload":
-                meta_len = int(self.headers.get("X-Meta-Length", 0))
-                meta = json.loads(body[:meta_len])
-                data = body[meta_len:]
-
-                rel = os.path.normpath(meta["path"]).replace("\\", "/")
-                fp = safe_path(rel)
-                os.makedirs(os.path.dirname(fp), exist_ok=True)
-
-                idx = load_index()
-                existing = idx.get(rel)
-                sha = sha256_bytes(data)
-
-                if existing and existing["sha"] == sha:
-                    self.json_response({"ok": True, "skipped": True})
-                    return
-
-                if existing and existing["sha"] != sha:
-                    if conflict_already_logged(rel, sha):
-                        self.json_response(
-                            {"ok": False, "conflict": True, "reason": "already_reported"},
-                            code=409
-                        )
-                        return
-
-                    base, ext = os.path.splitext(rel)
-                    conflict_name = f"{base} (conflict @{int(time.time())}){ext}"
-                    with open(safe_path(conflict_name), "wb") as f:
-                        f.write(data)
-
-                    log_event("conflict", rel, existing["version"], sha)
-                    CONFLICTS.inc()
-
-                    self.json_response(
-                        {"ok": False, "conflict": True, "file": conflict_name},
-                        code=409
-                    )
-                    return
-
-                with open(fp, "wb") as f:
-                    f.write(data)
-
-                version = existing["version"] + 1 if existing else 1
-                idx[rel] = {
-                    "sha": sha,
-                    "mtime": os.stat(fp).st_mtime,
-                    "version": version
-                }
-                save_index(idx)
-
-                log_event("upload", rel, version, sha)
-                UPLOADS.inc()
-
-                self.json_response({"ok": True, "version": version})
-
-            elif self.path == "/delete":
-                req = json.loads(body)
-                rel = os.path.normpath(req["path"]).replace("\\", "/")
-                fp = safe_path(rel)
-
-                if os.path.exists(fp):
-                    os.remove(fp)
-
-                idx = load_index()
-                idx.pop(rel, None)
-                save_index(idx)
-
-                log_event("delete", rel)
-                DELETES.inc()
-
-                self.json_response({"ok": True})
-
-            else:
-                self.send_error(404)
-
+            if length == 0:
+                return self._json(400, {"error": "empty body"})
+            
+            data = json.loads(self.rfile.read(length))
+            
+            save_event(
+                path=data["path"],
+                file_hash=data.get("hash"),
+                deleted=data.get("deleted", False),
+                client=data.get("client", "UNKNOWN"),
+                content=data.get("content")
+            )
+            
+            self._json(200, {"status": "ok"})
         except Exception as e:
-            log.error(f"POST error: {e}")
-            self.send_error(500)
-        finally:
-            self.track("POST", self.path, start)
+            print(f"[SERVER ERROR] POST /event failed: {e}")
+            self._json(500, {"error": str(e)})
 
+    def do_GET(self):
+        parsed = urlparse(self.path)
 
-# ==============================
-# Main
-# ==============================
-def main():
-    os.makedirs(ROOT, exist_ok=True)
-    save_index(load_index())
-    init_db()
+        if parsed.path == "/sync":
+            try:
+                since_id = int(parse_qs(parsed.query).get("since_id", [0])[0])
+                events = get_events(since_id)
+                return self._json(200, events)
+            except Exception as e:
+                print(f"[SERVER ERROR] GET /sync failed: {e}")
+                return self._json(500, {"error": str(e)})
 
-    threading.Thread(
-        target=start_http_server,
-        args=(METRICS_PORT,),
-        daemon=True
-    ).start()
-
-    log.info(f"Server running on port {SERVER_PORT}")
-    HTTPServer(("0.0.0.0", SERVER_PORT), Handler).serve_forever()
+        return self._json(404, {"error": "not found"})
 
 
 if __name__ == "__main__":
-    main()
+    # Initialize database table
+    try:
+        init_database()
+    except Exception as e:
+        print(f"[SERVER WARNING] Database initialization failed: {e}")
+        print("[SERVER WARNING] Continuing anyway - table might already exist")
+    
+    # Create storage directory if it doesn't exist
+    os.makedirs(STORAGE_DIR, exist_ok=True)
+    print(f"[SERVER] Storage directory: {STORAGE_DIR}")
+    
+    # Start storage watcher thread
+    threading.Thread(target=watch_storage, daemon=True).start()
+    print(f"[SERVER] Storage watcher started")
+    
+    print(f"[SERVER] Running on port {SERVER_PORT}")
+    HTTPServer(("0.0.0.0", SERVER_PORT), SyncHandler).serve_forever()

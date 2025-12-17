@@ -55,11 +55,11 @@ flake8==7.1.1                   # Linting and style checker
    ```
 
    This launches:
-   - 🐘 PostgreSQL database (`sync_postgres`)
-   - ⚙️ Sync server (`sync_server`) on port 8080
-   - 💻 Sync client (`sync_client`)
-   - 📊 Grafana dashboard on port 3030
-   - 📈 Prometheus metrics on port 9090
+   -  PostgreSQL database (`sync_postgres`)
+   -  Sync server (`sync_server`) on port 8080
+   -  Sync client (`sync_client`)
+   -  Grafana dashboard on port 3030
+   -  Prometheus metrics on port 9090
 
 3. **Access the system:**
    - **Server API**: http://localhost:8080
@@ -108,7 +108,7 @@ flake8==7.1.1                   # Linting and style checker
    python -m client.client
    ```
 
-## 🧩 How Synchronization Works
+##  How Synchronization Works
 
 ### Core Algorithm
 1. **Client scans local folder** (`synced/`) periodically
@@ -130,7 +130,7 @@ When both client and server have modified the same file:
 - Modification timestamps track change order
 - All operations logged to PostgreSQL (when enabled)
 
-## 📊 Monitoring & Observability
+##  Monitoring & Observability
 
 ### Metrics Endpoints
 - **Prometheus**: `http://localhost:8000/metrics`
@@ -155,7 +155,7 @@ CREATE TABLE files_log (
 );
 ```
 
-## 🧪 Testing
+##  Testing
 
 Run the test suite:
 ```bash
@@ -169,7 +169,7 @@ python -m pytest tests/
 - Database logging
 - Error handling
 
-## 🏛️ Project Structure
+##  Project Structure
 
 ```
 synced-folder/
@@ -197,7 +197,7 @@ synced-folder/
 └── README.md
 ```
 
-## 🔧 Configuration
+##  Configuration
 
 ### Environment Variables
 
@@ -212,7 +212,7 @@ synced-folder/
 | `POSTGRES_USER` | syncuser | Database user |
 | `POSTGRES_PASSWORD` | syncpass | Database password |
 
-## 🛠️ Development
+##  Development
 
 ### Code Quality
 ```bash
@@ -229,7 +229,7 @@ pytest --cov=src tests/
 - Configuration in `src/config/settings.py`
 - Tests in `tests/` directory
 
-## ⚠️ Limitations
+##  Limitations
 
 This is a simplified demo implementation with the following limitations:
 - **No authentication** - anyone can access the sync server
@@ -239,7 +239,7 @@ This is a simplified demo implementation with the following limitations:
 - **No distributed conflict resolution** - basic conflict handling only
 - **No user management** - single shared sync space
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -251,7 +251,7 @@ This is a simplified demo implementation with the following limitations:
 
 Released under the MIT License - see [LICENSE](LICENSE) file for details.
 
-## 👤 Author
+##  Author
 
 **Sahar Gehasi**  
 Built as part of a Computer Systems Workshop final project.  
