@@ -5,7 +5,7 @@
   "tags": ["sync", "postgres", "files"],
   "timezone": "browser",
   "schemaVersion": 36,
-  "version": 1,
+  "version": 3,
   "refresh": "5s",
   "panels": [
     {
@@ -14,7 +14,7 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS total_updates FROM public.files_log WHERE action = 'UPDATE';",
+          "rawSql": "SELECT COUNT(*) AS value FROM public.file_events WHERE deleted = false;",
           "format": "table",
           "refId": "A"
         }
@@ -30,7 +30,7 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT COUNT(*) AS total_deletions FROM public.files_log WHERE action = 'DELETE';",
+          "rawSql": "SELECT COUNT(*) AS value FROM public.file_events WHERE deleted = true;",
           "format": "table",
           "refId": "B"
         }
@@ -42,18 +42,17 @@
     },
     {
       "type": "timeseries",
-      "title": "Activity Over Time (by Action)",
+      "title": "Activity Over Time (Updates vs Deletions)",
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT $__time(timestamp), action, COUNT(*) AS total FROM public.files_log GROUP BY 1, action ORDER BY 1;",
+          "rawSql": "SELECT date_trunc('hour', created_at) AS time, CASE WHEN deleted THEN 'DELETE' ELSE 'UPDATE' END AS metric, COUNT(*) AS total FROM public.file_events GROUP BY time, metric ORDER BY time;",
           "format": "time_series",
           "refId": "C"
         }
       ],
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "single" }
+        "legend": { "displayMode": "list", "placement": "bottom" }
       },
       "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 }
     },
@@ -63,7 +62,7 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT action, COUNT(*) AS total FROM public.files_log GROUP BY action ORDER BY total DESC;",
+          "rawSql": "SELECT CASE WHEN deleted THEN 'DELETE' ELSE 'UPDATE' END AS action, COUNT(*) AS total FROM public.file_events GROUP BY action ORDER BY total DESC;",
           "format": "table",
           "refId": "D"
         }
@@ -80,12 +79,13 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT path, COUNT(*) AS changes FROM public.files_log GROUP BY path ORDER BY changes DESC LIMIT 10;",
+          "rawSql": "SELECT path, COUNT(*) AS changes FROM public.file_events GROUP BY path ORDER BY changes DESC LIMIT 10;",
           "format": "table",
           "refId": "E"
         }
       ],
-      "options": { "showHeader": true },
+      "options": { "showHeader": true }
+      ,
       "gridPos": { "x": 6, "y": 10, "w": 6, "h": 6 }
     },
     {
@@ -94,15 +94,11 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT $__time(date_trunc('day', timestamp)), COUNT(*) AS total FROM public.files_log GROUP BY 1 ORDER BY 1;",
+          "rawSql": "SELECT date_trunc('day', created_at) AS time, COUNT(*) AS total FROM public.file_events GROUP BY time ORDER BY time;",
           "format": "time_series",
           "refId": "F"
         }
       ],
-      "options": {
-        "legend": { "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "single" }
-      },
       "gridPos": { "x": 0, "y": 16, "w": 12, "h": 6 }
     },
     {
@@ -111,15 +107,11 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT $__time(date_trunc('hour', timestamp)), COUNT(*) AS total FROM public.files_log WHERE timestamp > NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1;",
+          "rawSql": "SELECT date_trunc('hour', created_at) AS time, COUNT(*) AS total FROM public.file_events WHERE created_at > NOW() - INTERVAL '24 hours' GROUP BY time ORDER BY time;",
           "format": "time_series",
           "refId": "G"
         }
       ],
-      "options": {
-        "legend": { "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "single" }
-      },
       "gridPos": { "x": 0, "y": 22, "w": 12, "h": 6 }
     },
     {
@@ -128,7 +120,7 @@
       "datasource": "Postgres",
       "targets": [
         {
-          "rawSql": "SELECT EXTRACT(HOUR FROM timestamp) AS hour_of_day, action, COUNT(*) AS total FROM public.files_log GROUP BY hour_of_day, action ORDER BY hour_of_day;",
+          "rawSql": "SELECT EXTRACT(HOUR FROM created_at) AS hour_of_day, CASE WHEN deleted THEN 'DELETE' ELSE 'UPDATE' END AS action, COUNT(*) AS total FROM public.file_events GROUP BY hour_of_day, action ORDER BY hour_of_day;",
           "format": "table",
           "refId": "H"
         }
